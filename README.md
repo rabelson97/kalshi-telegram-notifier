@@ -37,6 +37,9 @@ The bot follows a simple 6-step workflow:
 - **Flexible Environment**: Supports both demo and production environments
 - **Dry Run Mode**: Test the bot without placing real bets
 - **Rich Console**: Beautiful progress tracking and result display with probability predictions
+- **Telegram Alerts**: Sends high-confidence opportunities to Telegram with market odds + AI summaries
+- **Notification-First**: Automated trading is disabled by default until you explicitly opt in
+- **CI Friendly**: GitHub Actions workflow runs on an hourly schedule for always-on monitoring
 
 ## Quick Start
 
@@ -96,6 +99,17 @@ uv run trading-bot --max-expiration-hours 6
 uv run trading-bot --live --max-expiration-hours 12
 ```
 
+## Telegram Notifications
+
+The bot can push the best opportunities directly to Telegram. Notifications are only sent when a decision meets your confidence threshold (`MIN_CONFIDENCE_FOR_NOTIFICATION`, default 0.7) and the top-N cap (`MAX_NOTIFICATIONS_PER_RUN`, default 5).
+
+1. **Create a bot** – message [@BotFather](https://t.me/botfather) and follow `/newbot` instructions to receive `TELEGRAM_BOT_TOKEN`.
+2. **Find your chat ID** – message [@userinfobot](https://t.me/userinfobot) and copy the numeric `chat_id` to `TELEGRAM_CHAT_ID`.
+3. **Update `.env`** – fill in the new fields from `env_template.txt`, keeping `DISABLE_TRADING=true` unless you plan to place real orders.
+4. **Run the bot** – `uv run trading_bot.py --max-expiration-hours 24` (demo recommended). You should receive alerts for the top opportunities.
+
+Notifications include bid/ask data, spread, time-to-close, AI probability/confidence, and both the decision reasoning plus research summary so you can act manually.
+
 ## Configuration
 
 Key settings in `.env`:
@@ -109,6 +123,17 @@ MAX_EVENTS_TO_ANALYZE=50      # Number of top events to analyze by 24h volume
 MAX_BET_AMOUNT=25.0           # Maximum bet per market
 RESEARCH_BATCH_SIZE=10        # Number of parallel deep research requests
 SKIP_EXISTING_POSITIONS=true # Skip betting on markets where we already have positions
+MAX_HOURS_TO_CLOSE=24.0       # Only analyze markets closing within this many hours
+MIN_SPREAD_CENTS=1            # Minimum bid/ask spread (cents) to keep a market
+
+# Telegram notifications
+TELEGRAM_BOT_TOKEN=your_bot_token
+TELEGRAM_CHAT_ID=your_chat_id
+MIN_CONFIDENCE_FOR_NOTIFICATION=0.7
+MAX_NOTIFICATIONS_PER_RUN=5
+
+# Trading control
+DISABLE_TRADING=true          # Notifications only (recommended)
 
 # Risk Management / Hedging
 ENABLE_HEDGING=true           # Enable hedging to minimize risk and protect downside
@@ -129,6 +154,9 @@ OPENAI_API_KEY=your_key
 - **RESEARCH_BATCH_SIZE**: Controls how many deep research requests are sent in parallel. Higher values process faster but may hit rate limits. Recommended range: 1-20.
 - **SKIP_EXISTING_POSITIONS**: When enabled (default), the bot will skip betting on markets where you already have positions to avoid duplicate trades.
 - **MAX_MARKETS_PER_EVENT**: Controls how many markets per event to analyze (default: 10). For events with many markets, selects the top N markets by volume to keep context manageable.
+- **MAX_HOURS_TO_CLOSE / MIN_SPREAD_CENTS**: Provide lightweight liquidity filters so the AI only reviews markets closing soon with at least a 1¢ bid/ask spread.
+- **DISABLE_TRADING**: Keeps the bot in dry-run/notification mode. Set to `false` **and** run with `--live` only when you're ready to place orders automatically.
+- **MIN_CONFIDENCE_FOR_NOTIFICATION** and **MAX_NOTIFICATIONS_PER_RUN**: Control Telegram alert quality/volume so you only see the best ideas.
 
 **Risk Management & Hedging:**
 - **ENABLE_HEDGING**: When enabled (default), automatically generates hedge bets to minimize downside risk
@@ -151,6 +179,29 @@ OPENAI_API_KEY=your_key
 2. `KALSHI_USE_DEMO=true` + `--live`: Test with demo data, fake bets placed
 3. `KALSHI_USE_DEMO=false` + Default (dry run): Test with real data, no bets placed
 4. `KALSHI_USE_DEMO=false` + `--live`: **LIVE TRADING** with real money
+
+## GitHub Actions Automation
+
+A workflow at `.github/workflows/bot-scheduler.yml` runs the bot every hour (cron `0 * * * *`) or on-demand via the **Run workflow** button. It:
+
+1. Checks out the repository on `ubuntu-latest`
+2. Installs Python 3.12 and `uv`
+3. Syncs dependencies (`uv sync`)
+4. Runs `uv run trading_bot.py` with secrets for Kalshi, Octagon, OpenAI, and Telegram
+
+### Required GitHub Secrets
+
+Set these under **Settings → Secrets → Actions**:
+
+- `KALSHI_API_KEY`
+- `KALSHI_PRIVATE_KEY`
+- `KALSHI_USE_DEMO` (e.g., `true`)
+- `OCTAGON_API_KEY`
+- `OPENAI_API_KEY`
+- `TELEGRAM_BOT_TOKEN`
+- `TELEGRAM_CHAT_ID`
+
+The workflow also forces `DISABLE_TRADING=true`, `MAX_HOURS_TO_CLOSE=24`, `MIN_SPREAD_CENTS=1`, and `MAX_NOTIFICATIONS_PER_RUN=5` so the hourly run stays lightweight and notification-only.
 
 ## Project Structure
 

@@ -1,0 +1,48 @@
+name: Kalshi Trading Bot Scheduler
+
+on:
+  schedule:
+    - cron: "0 * * * *" # Every hour
+  workflow_dispatch:
+
+jobs:
+  run-bot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install uv
+        run: curl -LsSf https://astral.sh/uv/install.sh | sh
+
+      - name: Install dependencies
+        run: |
+          export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH"
+          uv sync
+
+      - name: Run trading bot (notifications only)
+        env:
+          PYTHONUNBUFFERED: "1"
+          KALSHI_API_KEY: ${{ secrets.KALSHI_API_KEY }}
+          KALSHI_PRIVATE_KEY: ${{ secrets.KALSHI_PRIVATE_KEY }}
+          KALSHI_USE_DEMO: ${{ secrets.KALSHI_USE_DEMO }}
+          OCTAGON_API_KEY: ${{ secrets.OCTAGON_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          DISABLE_TRADING: "true"
+          MAX_EVENTS_TO_ANALYZE: "40"
+          MAX_HOURS_TO_CLOSE: "24"
+          MIN_SPREAD_CENTS: "1"
+          MIN_CONFIDENCE_FOR_NOTIFICATION: "0.7"
+          MAX_NOTIFICATIONS_PER_RUN: "5"
+        run: |
+          export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH"
+          uv run trading_bot.py --max-expiration-hours 24

@@ -1,25 +1,26 @@
 """
 Simple Kalshi trading bot with Octagon research and OpenAI decision making.
 """
-import asyncio
 import argparse
-import json
+import asyncio
 import csv
+import html
 import json
-import csv
-import datetime
 import math
-from pathlib import Path
-import sys
-from datetime import datetime
-from pathlib import Path
-from typing import Dict, Any, List, Optional
-import time
-from rich.console import Console
-from rich.table import Table
-from rich.progress import Progress, SpinnerColumn, TextColumn
-from loguru import logger
 import re
+import sys
+import time
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any, Dict, List, Optional
+
+from loguru import logger
+from rich.console import Console
+from rich.progress import Progress, SpinnerColumn, TextColumn
+from rich.table import Table
+from telegram import Bot
+from telegram.constants import ParseMode
+from telegram.error import TelegramError
 
 from kalshi_client import KalshiClient
 from research_client import OctagonClient
@@ -33,13 +34,42 @@ class SimpleTradingBot:
     
     def __init__(self, live_trading: bool = False, max_close_ts: Optional[int] = None):
         self.config = load_config()
-        # Override dry_run based on CLI parameter
-        self.config.dry_run = not live_trading
+        self.live_trading_requested = live_trading
+
+        # Notifications-only by default unless explicitly re-enabled
+        self.config.disable_trading = getattr(self.config, "disable_trading", True)
+        if self.config.disable_trading:
+            self.config.dry_run = True
+        else:
+            self.config.dry_run = not live_trading
+
         self.console = Console()
         self.kalshi_client = None
         self.research_client = None
         self.openai_client = None
-        self.max_close_ts = max_close_ts
+
+        # Determine expiration horizon (CLI override > config default)
+        now_ts = int(time.time())
+        self.default_close_hours = getattr(self.config, "max_hours_to_close", None)
+        if max_close_ts is not None:
+            self.max_close_ts = max_close_ts
+            self.max_close_window_hours = max((self.max_close_ts - now_ts) / 3600, 0)
+        elif self.default_close_hours:
+            self.max_close_window_hours = self.default_close_hours
+            self.max_close_ts = now_ts + int(self.default_close_hours * 3600)
+        else:
+            self.max_close_ts = None
+            self.max_close_window_hours = None
+
+        # Telegram notification client (optional)
+        self.telegram_bot = None
+        self.telegram_chat_id = getattr(self.config, "telegram_chat_id", None)
+        if self.config.telegram_bot_token and self.telegram_chat_id:
+            try:
+                self.telegram_bot = Bot(token=self.config.telegram_bot_token)
+            except Exception as exc:
+                logger.error(f"Failed to initialize Telegram bot: {exc}")
+                self.telegram_bot = None
         
     async def initialize(self):
         """Initialize all API clients."""
@@ -68,6 +98,10 @@ class SimpleTradingBot:
         
         self.console.print(f"\n[{env_color}]Environment: {env_name}[/{env_color}]")
         self.console.print(f"[blue]Mode: {mode}[/blue]")
+        if self.config.disable_trading and self.live_trading_requested:
+            self.console.print("[yellow]Live trading was requested but DISABLE_TRADING=true. Running in notifications-only mode.[/yellow]")
+        elif self.config.disable_trading:
+            self.console.print("[yellow]DISABLE_TRADING=true → skipping order placement (notifications only).[/yellow]")
         self.console.print(f"[blue]Max events to analyze: {self.config.max_events_to_analyze}[/blue]")
         self.console.print(f"[blue]Research batch size: {self.config.research_batch_size}[/blue]")
         self.console.print(f"[blue]Skip existing positions: {self.config.skip_existing_positions}[/blue]")
@@ -76,6 +110,8 @@ class SimpleTradingBot:
         self.console.print(f"[blue]Max bet amount: ${self.config.max_bet_amount}[/blue]")
         hedging_status = "Enabled" if self.config.enable_hedging else "Disabled"
         self.console.print(f"[blue]Risk hedging: {hedging_status} (ratio: {self.config.hedge_ratio}, min confidence: {self.config.min_confidence_for_hedging})[/blue]")
+        telegram_status = "Enabled" if self.telegram_bot else "Disabled"
+        self.console.print(f"[blue]Telegram notifications: {telegram_status}[/blue]")
         
         # Show risk-adjusted trading settings
         self.console.print(f"[blue]R-score filtering: Enabled (z-threshold: {self.config.z_threshold})[/blue]")
@@ -83,8 +119,7 @@ class SimpleTradingBot:
             self.console.print(f"[blue]Kelly sizing: Enabled (fraction: {self.config.kelly_fraction}, bankroll: ${self.config.bankroll})[/blue]")
         self.console.print(f"[blue]Portfolio selection: {self.config.portfolio_selection_method} (max positions: {self.config.max_portfolio_positions})[/blue]\n")
         if self.max_close_ts is not None:
-            hours_from_now = (self.max_close_ts - int(time.time())) / 3600
-            # Show one decimal hour precision
+            hours_from_now = max((self.max_close_ts - int(time.time())) / 3600, 0)
             self.console.print(f"[blue]Market expiration filter: close before ~{hours_from_now:.1f} hours from now[/blue]")
     
     def calculate_risk_adjusted_metrics(self, research_prob: float, market_price: float, action: str) -> dict:
@@ -415,6 +450,91 @@ class SimpleTradingBot:
             self.console.print(f"[green]✓ Estimated time saved by skipping research: ~{time_saved_estimate} minutes[/green]")
             
         return filtered_event_markets
+
+    def filter_markets_by_criteria(
+        self,
+        event_markets: Dict[str, Dict[str, Any]],
+        market_odds: Dict[str, Dict[str, Any]],
+    ) -> Dict[str, Dict[str, Any]]:
+        """Filter markets by expiration window and bid/ask spread."""
+        if not event_markets:
+            return {}
+
+        max_close_ts = self.max_close_ts
+        if max_close_ts is None and getattr(self.config, "max_hours_to_close", None):
+            max_close_ts = int(time.time()) + int(self.config.max_hours_to_close * 3600)
+
+        min_spread = max(0, getattr(self.config, "min_spread_cents", 0))
+        total_markets = 0
+        kept_markets = 0
+        filtered_events: Dict[str, Dict[str, Any]] = {}
+
+        for event_ticker, data in event_markets.items():
+            kept = []
+            for market in data["markets"]:
+                total_markets += 1
+                ticker = market.get("ticker")
+                if not ticker:
+                    continue
+
+                odds = market_odds.get(ticker)
+                if not odds:
+                    continue
+
+                close_time_str = odds.get("close_time") or market.get("close_time")
+                close_ts = self._parse_kalshi_timestamp(close_time_str)
+                if max_close_ts and (close_ts is None or close_ts > max_close_ts):
+                    continue
+
+                yes_bid = odds.get("yes_bid")
+                yes_ask = odds.get("yes_ask")
+                try:
+                    spread = abs((yes_ask or 0) - (yes_bid or 0))
+                except TypeError:
+                    spread = 0
+                if spread < min_spread:
+                    continue
+
+                kept.append(market)
+
+            if kept:
+                filtered_events[event_ticker] = {
+                    "event": data["event"],
+                    "markets": kept,
+                }
+                kept_markets += len(kept)
+
+        hours_window = None
+        if max_close_ts:
+            hours_window = max((max_close_ts - int(time.time())) / 3600, 0)
+        elif getattr(self.config, "max_hours_to_close", None):
+            hours_window = self.config.max_hours_to_close
+
+        window_str = f"{hours_window:.1f}h" if hours_window is not None else "anytime"
+        self.console.print(
+            f"[blue]• Liquidity/expiration filter kept {kept_markets}/{total_markets} markets "
+            f"(≤ {window_str}, spread ≥ {min_spread}¢)[/blue]"
+        )
+
+        if not filtered_events:
+            self.console.print("[yellow]No markets passed the liquidity/expiration filter[/yellow]")
+
+        return filtered_events
+
+    @staticmethod
+    def _parse_kalshi_timestamp(ts_str: Optional[str]) -> Optional[int]:
+        """Parse Kalshi ISO timestamps into epoch seconds."""
+        if not ts_str:
+            return None
+        try:
+            if ts_str.endswith("Z"):
+                ts_str = ts_str.replace("Z", "+00:00")
+            dt = datetime.fromisoformat(ts_str)
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            return int(dt.timestamp())
+        except Exception:
+            return None
 
     def _parse_probabilities_from_research(self, research_text: str, markets: List[Dict[str, Any]]) -> Dict[str, float]:
         """Parse probability predictions from Octagon research text."""
@@ -1446,6 +1566,170 @@ class SimpleTradingBot:
             self.console.print("\n[yellow]DRY RUN MODE: No actual bets were placed[/yellow]")
         else:
             self.console.print(f"\n[green]✓ Completed bet placement[/green]")
+
+    async def send_telegram_notifications(
+        self,
+        analysis: MarketAnalysis,
+        market_odds: Dict[str, Dict[str, Any]],
+        probability_extractions: Dict[str, ProbabilityExtraction],
+        event_markets: Dict[str, Dict[str, Any]],
+    ):
+        """Send Telegram alerts for high-confidence opportunities."""
+        if not self.telegram_bot or not self.telegram_chat_id:
+            self.console.print("[yellow]Telegram not configured; skipping notifications[/yellow]")
+            return
+
+        if not analysis.decisions:
+            self.console.print("[yellow]No decisions available for Telegram notifications[/yellow]")
+            return
+
+        actionable = [
+            d for d in analysis.decisions
+            if d.action != "skip" and not getattr(d, "is_hedge", False)
+        ]
+        if not actionable:
+            self.console.print("[yellow]No actionable decisions to notify[/yellow]")
+            return
+
+        min_conf = getattr(self.config, "min_confidence_for_notification", 0.0)
+        high_conf = [d for d in actionable if d.confidence >= min_conf]
+        if not high_conf:
+            self.console.print(
+                f"[yellow]No decisions met the notification confidence threshold ({min_conf:.2f})[/yellow]"
+            )
+            return
+
+        max_notifications = max(1, getattr(self.config, "max_notifications_per_run", 1))
+        high_conf.sort(key=lambda d: d.confidence, reverse=True)
+        selected = high_conf[:max_notifications]
+
+        self.console.print(f"\n[bold]Sending {len(selected)} Telegram notification(s)...[/bold]")
+
+        for decision in selected:
+            message = self._build_notification_message(
+                decision,
+                market_odds,
+                probability_extractions,
+                event_markets,
+            )
+            if not message:
+                continue
+
+            try:
+                await self.telegram_bot.send_message(
+                    chat_id=self.telegram_chat_id,
+                    text=message,
+                    parse_mode=ParseMode.HTML,
+                    disable_web_page_preview=True,
+                )
+                self.console.print(f"[green]✓ Sent Telegram alert for {decision.ticker}[/green]")
+            except TelegramError as exc:
+                logger.error(f"Telegram error for {decision.ticker}: {exc}")
+                self.console.print(f"[red]✗ Failed to send Telegram alert for {decision.ticker}: {exc}[/red]")
+
+    def _build_notification_message(
+        self,
+        decision: BettingDecision,
+        market_odds: Dict[str, Dict[str, Any]],
+        probability_extractions: Dict[str, ProbabilityExtraction],
+        event_markets: Dict[str, Dict[str, Any]],
+    ) -> Optional[str]:
+        """Format a Telegram notification payload."""
+        odds = market_odds.get(decision.ticker, {})
+        yes_bid = odds.get("yes_bid")
+        yes_ask = odds.get("yes_ask")
+        no_bid = odds.get("no_bid")
+        no_ask = odds.get("no_ask")
+        spread = None
+        try:
+            spread = abs((yes_ask or 0) - (yes_bid or 0))
+        except TypeError:
+            spread = None
+
+        close_ts = self._parse_kalshi_timestamp(odds.get("close_time"))
+        time_remaining = self._format_time_until(close_ts)
+
+        market_prob = self._lookup_market_probability(probability_extractions, decision.ticker)
+        ai_prob_text = f"{market_prob.research_probability:.1f}%" if market_prob else "n/a"
+        ai_conf_text = (
+            f"{market_prob.confidence * 100:.0f}%"
+            if market_prob and market_prob.confidence is not None
+            else None
+        )
+
+        event_name, market_name = self._get_market_metadata(event_markets, decision.ticker)
+        display_market = market_name or decision.market_name or decision.ticker
+        display_event = event_name or decision.event_name
+
+        def fmt_cents(value: Optional[Any]) -> str:
+            if value is None:
+                return "n/a"
+            try:
+                return f"{int(value)}¢"
+            except (TypeError, ValueError):
+                return "n/a"
+
+        spread_text = f"{int(spread)}¢" if spread is not None else "n/a"
+        decision_conf = f"{decision.confidence * 100:.0f}%"
+        action_label = "Buy YES" if decision.action == "buy_yes" else "Buy NO"
+
+        lines = [
+            f"🎯 <b>{html.escape(display_market)}</b>",
+        ]
+        if display_event:
+            lines.append(f"<i>{html.escape(display_event)}</i>")
+
+        lines.append(f"Action: {html.escape(action_label)} | Size: ${decision.amount:,.0f}")
+        lines.append(
+            f"Yes bid/ask: {fmt_cents(yes_bid)}/{fmt_cents(yes_ask)} | "
+            f"No bid/ask: {fmt_cents(no_bid)}/{fmt_cents(no_ask)}"
+        )
+        lines.append(f"Spread: {spread_text} | Closes in: {time_remaining}")
+
+        prob_line = f"AI Probability: {ai_prob_text}"
+        if ai_conf_text:
+            prob_line += f" (confidence {ai_conf_text})"
+        prob_line += f" | Decision confidence: {decision_conf}"
+        lines.append(prob_line)
+
+        if decision.reasoning:
+            lines.append(f"Reasoning: {html.escape(decision.reasoning)}")
+        if market_prob and market_prob.reasoning:
+            lines.append(f"Research: {html.escape(market_prob.reasoning)}")
+
+        return "\n".join(lines)
+
+    @staticmethod
+    def _lookup_market_probability(
+        probability_extractions: Dict[str, ProbabilityExtraction], ticker: str
+    ):
+        for extraction in probability_extractions.values():
+            for market_prob in extraction.markets:
+                if market_prob.ticker == ticker:
+                    return market_prob
+        return None
+
+    @staticmethod
+    def _get_market_metadata(
+        event_markets: Dict[str, Dict[str, Any]], ticker: str
+    ) -> tuple[Optional[str], Optional[str]]:
+        for data in event_markets.values():
+            event = data.get("event", {})
+            for market in data.get("markets", []):
+                if market.get("ticker") == ticker:
+                    return event.get("title"), market.get("title")
+        return None, None
+
+    @staticmethod
+    def _format_time_until(close_ts: Optional[int]) -> str:
+        if close_ts is None:
+            return "unknown"
+        hours = (close_ts - time.time()) / 3600
+        if hours <= 0:
+            return "closed"
+        if hours >= 24:
+            return f"{hours / 24:.1f}d"
+        return f"{hours:.1f}h"
  
     def save_betting_decisions_to_csv(self, 
                                      analysis: MarketAnalysis, 
@@ -1723,24 +2007,29 @@ class SimpleTradingBot:
                 self.console.print("[red]No markets remaining after position filtering. Exiting.[/red]")
                 return
             
-            # Limit to max_events_to_analyze after position filtering
+            market_odds = await self.get_market_odds(event_markets)
+            if not market_odds:
+                self.console.print("[red]No market odds found. Exiting.[/red]")
+                return
+
+            event_markets = self.filter_markets_by_criteria(event_markets, market_odds)
+            if not event_markets:
+                self.console.print("[red]No markets remaining after liquidity/expiration filtering. Exiting.[/red]")
+                return
+            
+            # Limit to max_events_to_analyze after filtering
             if len(event_markets) > self.config.max_events_to_analyze:
-                # Sort filtered events by volume_24h and take top N
                 filtered_events_list = []
                 for event_ticker, data in event_markets.items():
                     event = data['event']
                     volume_24h = event.get('volume_24h', 0)
                     filtered_events_list.append((event_ticker, data, volume_24h))
                 
-                # Sort by volume_24h (descending) and take top max_events_to_analyze
                 filtered_events_list.sort(key=lambda x: x[2], reverse=True)
                 top_events = filtered_events_list[:self.config.max_events_to_analyze]
-                
-                # Rebuild event_markets dict with only top events
                 event_markets = {event_ticker: data for event_ticker, data, _ in top_events}
-                
-                self.console.print(f"[blue]• Limited to top {len(event_markets)} events by volume after position filtering[/blue]")
-            
+                self.console.print(f"[blue]• Limited to top {len(event_markets)} events by volume after filtering[/blue]")
+
             research_results = await self.research_events(event_markets)
             if not research_results:
                 self.console.print("[red]No research results. Exiting.[/red]")
@@ -1749,11 +2038,6 @@ class SimpleTradingBot:
             probability_extractions = await self.extract_probabilities(research_results, event_markets)
             if not probability_extractions:
                 self.console.print("[red]No probability extractions. Exiting.[/red]")
-                return
-            
-            market_odds = await self.get_market_odds(event_markets)
-            if not market_odds:
-                self.console.print("[red]No market odds found. Exiting.[/red]")
                 return
             
             analysis = await self.get_betting_decisions(event_markets, probability_extractions, market_odds)
@@ -1767,7 +2051,17 @@ class SimpleTradingBot:
                 event_markets=event_markets
             )
             
-            await self.place_bets(analysis, market_odds, probability_extractions)
+            if self.config.disable_trading:
+                self.console.print("[yellow]Skipping order placement because DISABLE_TRADING=true[/yellow]")
+            else:
+                await self.place_bets(analysis, market_odds, probability_extractions)
+
+            await self.send_telegram_notifications(
+                analysis,
+                market_odds,
+                probability_extractions,
+                event_markets,
+            )
             
             self.console.print("\n[bold green]Bot execution completed![/bold green]")
             

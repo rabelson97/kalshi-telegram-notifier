@@ -47,6 +47,15 @@ MINIMUM_TIME_REMAINING_HOURS=1.0  # Minimum hours remaining before event strike 
 MAX_MARKETS_PER_EVENT=10     # Maximum number of markets per event to analyze (selects top N markets by volume)
 MINIMUM_ALPHA_THRESHOLD=2.0  # Minimum alpha threshold for betting (research_price / market_price must be >= this value)
 
+# Market filtering & notifications
+MAX_HOURS_TO_CLOSE=24.0              # Only analyze markets closing within this many hours
+MIN_SPREAD_CENTS=1                   # Minimum bid/ask spread (cents) to ensure basic liquidity
+MIN_CONFIDENCE_FOR_NOTIFICATION=0.7  # Minimum AI confidence required before sending a Telegram alert
+MAX_NOTIFICATIONS_PER_RUN=5          # Send at most this many notifications per execution
+TELEGRAM_BOT_TOKEN=                  # Telegram bot token from @BotFather
+TELEGRAM_CHAT_ID=                    # Telegram chat/channel ID (use @userinfobot to find yours)
+DISABLE_TRADING=true                 # Keep automated trading disabled (notifications only)
+
 # Risk management / hedging configuration
 ENABLE_HEDGING=true           # Enable hedging to minimize risk and protect downside
 HEDGE_RATIO=0.25              # Default hedge ratio (0.25 = hedge 25% of main bet on opposite side)

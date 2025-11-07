@@ -114,6 +114,15 @@ class BotConfig(BaseSettings):
     hedge_ratio: float = Field(default=0.25, ge=0, le=0.5, description="Default hedge ratio (0.25 = hedge 25% of main bet)")
     min_confidence_for_hedging: float = Field(default=0.6, ge=0, le=1, description="Only hedge bets with confidence below this threshold")
     max_hedge_amount: float = Field(default=50.0, description="Maximum hedge amount per bet")
+
+    # Market filtering & notifications
+    max_hours_to_close: float = Field(default=24.0, description="Only analyze markets closing within this many hours")
+    min_spread_cents: int = Field(default=1, description="Minimum bid-ask spread (in cents) to consider a market liquid enough")
+    telegram_bot_token: Optional[str] = Field(default=None, description="Telegram bot token for notifications")
+    telegram_chat_id: Optional[str] = Field(default=None, description="Telegram chat/channel ID for notifications")
+    min_confidence_for_notification: float = Field(default=0.7, ge=0, le=1, description="Minimum AI confidence required to send a Telegram notification")
+    max_notifications_per_run: int = Field(default=5, description="Maximum number of Telegram notifications to send per run")
+    disable_trading: bool = Field(default=True, description="Disable automated trading and operate in dry-run / notification-only mode")
     
     def __init__(self, **data):
         # Build nested configs from environment variables
@@ -154,6 +163,8 @@ class BotConfig(BaseSettings):
             "minimum_time_remaining_hours": float(_clean_env_value(os.getenv("MINIMUM_TIME_REMAINING_HOURS", "1.0"))),
             "max_markets_per_event": int(_clean_env_value(os.getenv("MAX_MARKETS_PER_EVENT", "10"))),
             "minimum_alpha_threshold": float(_clean_env_value(os.getenv("MINIMUM_ALPHA_THRESHOLD", "2.0"))),
+            "max_hours_to_close": float(_clean_env_value(os.getenv("MAX_HOURS_TO_CLOSE", "24.0"))),
+            "min_spread_cents": int(_clean_env_value(os.getenv("MIN_SPREAD_CENTS", "1"))),
             # Risk-adjusted trading parameters
             "z_threshold": float(_clean_env_value(os.getenv("Z_THRESHOLD", "1.5"))),
             "enable_r_score_filtering": _clean_env_value(os.getenv("ENABLE_R_SCORE_FILTERING", "true")).lower() == "true",
@@ -169,7 +180,13 @@ class BotConfig(BaseSettings):
             "enable_hedging": _clean_env_value(os.getenv("ENABLE_HEDGING", "true")).lower() == "true",
             "hedge_ratio": float(_clean_env_value(os.getenv("HEDGE_RATIO", "0.25"))),
             "min_confidence_for_hedging": float(_clean_env_value(os.getenv("MIN_CONFIDENCE_FOR_HEDGING", "0.6"))),
-            "max_hedge_amount": float(_clean_env_value(os.getenv("MAX_HEDGE_AMOUNT", "50.0")))
+            "max_hedge_amount": float(_clean_env_value(os.getenv("MAX_HEDGE_AMOUNT", "50.0"))),
+            # Notifications & trading control
+            "telegram_bot_token": (_clean_env_value(os.getenv("TELEGRAM_BOT_TOKEN", "")) or None),
+            "telegram_chat_id": (_clean_env_value(os.getenv("TELEGRAM_CHAT_ID", "")) or None),
+            "min_confidence_for_notification": float(_clean_env_value(os.getenv("MIN_CONFIDENCE_FOR_NOTIFICATION", "0.7"))),
+            "max_notifications_per_run": int(_clean_env_value(os.getenv("MAX_NOTIFICATIONS_PER_RUN", "5"))),
+            "disable_trading": _clean_env_value(os.getenv("DISABLE_TRADING", "true")).lower() == "true",
         })
         
         super().__init__(**data)
