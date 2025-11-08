@@ -61,13 +61,14 @@ class BotConfig(BaseSettings):
 
     # Analysis limits
     dry_run: bool = Field(default=True, description="Always run in dry-run mode (no orders placed)")
-    max_events_to_analyze: int = Field(default=50, description="Number of top events to fetch by volume")
+    max_events_to_analyze: int = Field(default=600, description="Number of top events to fetch by volume")
     max_markets_per_event: int = Field(default=10, description="Top markets per event to evaluate")
 
     # Filtering thresholds
     max_hours_to_close: float = Field(default=24.0, description="Only analyze markets closing within N hours")
     min_yes_price_cents: int = Field(default=90, description="Minimum YES bid price in cents")
     min_spread_cents: int = Field(default=1, description="Minimum bid/ask spread in cents")
+    max_yes_ask_cents: int = Field(default=98, description="Maximum YES ask price (in cents) to ensure contracts can be purchased immediately")
     min_volume_24h: int = Field(default=1000, description="Minimum 24h volume (event or market) to consider")
 
     # Notifications
@@ -91,11 +92,12 @@ class BotConfig(BaseSettings):
         data.update(
             {
                 "kalshi": kalshi_config,
-                "max_events_to_analyze": int(_clean(os.getenv("MAX_EVENTS_TO_ANALYZE", "50"))),
+                "max_events_to_analyze": int(_clean(os.getenv("MAX_EVENTS_TO_ANALYZE", "600"))),
                 "max_markets_per_event": int(_clean(os.getenv("MAX_MARKETS_PER_EVENT", "10"))),
                 "max_hours_to_close": float(_clean(os.getenv("MAX_HOURS_TO_CLOSE", "24.0"))),
-                "min_yes_price_cents": int(_clean(os.getenv("MIN_YES_PRICE_CENTS", "90"))),
+                "min_yes_price_cents": int(_clean(os.getenv("MIN_YES_PRICE_CENTS", "97"))),
                 "min_spread_cents": int(_clean(os.getenv("MIN_SPREAD_CENTS", "1"))),
+                "max_yes_ask_cents": int(_clean(os.getenv("MAX_YES_ASK_CENTS", "99"))),
                 "min_volume_24h": int(_clean(os.getenv("MIN_VOLUME_24H", "1000"))),
                 "telegram_bot_token": (_clean(os.getenv("TELEGRAM_BOT_TOKEN", "")) or None),
                 "telegram_chat_id": (_clean(os.getenv("TELEGRAM_CHAT_ID", "")) or None),

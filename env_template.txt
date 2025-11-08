@@ -19,11 +19,12 @@ KALSHI_USE_DEMO=true
 # BOT FILTERS & LIMITS
 # =============================================================================
 
-MAX_EVENTS_TO_ANALYZE=50        # Number of top events (by 24h volume) to scan
+MAX_EVENTS_TO_ANALYZE=600       # Number of top events (by 24h volume) to scan
 MAX_MARKETS_PER_EVENT=10        # Max markets per event (selects top N by volume)
 MAX_HOURS_TO_CLOSE=24.0         # Only include markets closing within this many hours
-MIN_YES_PRICE_CENTS=90          # Minimum YES bid price (in cents) to qualify
+MIN_YES_PRICE_CENTS=97          # Minimum YES bid price (in cents) to qualify
 MIN_SPREAD_CENTS=1              # Minimum bid/ask spread (cents) to ensure liquidity
+MAX_YES_ASK_CENTS=99            # Maximum YES ask price so contracts are actually available (99 = allow up to $0.99)
 MIN_VOLUME_24H=1000             # Minimum 24h volume (event or market) to consider
 
 # =============================================================================

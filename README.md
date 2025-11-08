@@ -19,7 +19,7 @@ A lean, notification-first bot that scans Kalshi for ultra high-probability YES 
 1. **Fetch Top Events** – Pulls the most active Kalshi events by 24 h volume.
 2. **Grab Markets & Odds** – Collects the top markets per event plus live bid/ask snapshots.
 3. **Apply Filters** – Keeps only markets where:
-   - YES bid ≥ `MIN_YES_PRICE_CENTS` (default 90¢)
+   - YES bid ≥ `MIN_YES_PRICE_CENTS` (default 97¢)
    - Bid/ask spread ≥ `MIN_SPREAD_CENTS`
    - Closes within `MAX_HOURS_TO_CLOSE`
    - Event or market 24 h volume ≥ `MIN_VOLUME_24H`
@@ -75,10 +75,10 @@ KALSHI_API_KEY=...
 KALSHI_PRIVATE_KEY="-----BEGIN RSA PRIVATE KEY-----\n...\n-----END RSA PRIVATE KEY-----"
 KALSHI_USE_DEMO=true
 
-MAX_EVENTS_TO_ANALYZE=50
+MAX_EVENTS_TO_ANALYZE=600
 MAX_MARKETS_PER_EVENT=10
 MAX_HOURS_TO_CLOSE=24
-MIN_YES_PRICE_CENTS=90
+MIN_YES_PRICE_CENTS=97
 MIN_SPREAD_CENTS=1
 MIN_VOLUME_24H=1000
 

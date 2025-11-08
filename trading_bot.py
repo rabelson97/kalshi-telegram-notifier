@@ -201,6 +201,9 @@ class SimpleTradingBot:
                 if yes_bid < self.config.min_yes_price_cents:
                     rejects["price"] += 1
                     continue
+                if yes_ask is None or yes_ask > self.config.max_yes_ask_cents:
+                    rejects["price"] += 1
+                    continue
 
                 spread = yes_ask - yes_bid
                 if spread < self.config.min_spread_cents:
