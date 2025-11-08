@@ -4,6 +4,7 @@ Kalshi high-probability notifier that surfaces nearly certain YES markets.
 import argparse
 import asyncio
 import html
+import re
 import time
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
@@ -179,9 +180,10 @@ class SimpleTradingBot:
             "volume": 0,
         }
 
-        for data in event_markets.values():
+        for event_ticker, data in event_markets.items():
             event = data["event"]
             event_volume = event.get("volume_24h", 0)
+            event_slug = self._event_slug(event_ticker)
             for market in data["markets"]:
                 ticker = market.get("ticker")
                 if not ticker:
@@ -225,12 +227,18 @@ class SimpleTradingBot:
 
                 roi_cents = max(0, 100 - yes_bid)
                 roi_pct = (roi_cents / yes_bid * 100) if yes_bid else 0
+                ticker_base = ticker.rsplit("-", 1)[0].lower()
+                market_subtitle = market.get("subtitle") or market.get("yes_sub_title") or ""
 
                 results.append(
                     {
                         "ticker": ticker,
+                        "ticker_base": ticker_base,
+                        "event_ticker": event_ticker,
+                        "event_slug": event_slug,
                         "event_title": event.get("title", "N/A"),
                         "market_title": market.get("title", "N/A"),
+                        "market_subtitle": market_subtitle,
                         "yes_bid": yes_bid,
                         "yes_ask": yes_ask,
                         "spread": spread,
@@ -269,6 +277,7 @@ class SimpleTradingBot:
         table.add_column("Ticker", style="cyan")
         table.add_column("Event", style="green")
         table.add_column("Market", style="white")
+        table.add_column("Outcome", style="magenta")
         table.add_column("Yes Bid", justify="right")
         table.add_column("Yes Ask", justify="right")
         table.add_column("Spread", justify="right")
@@ -277,10 +286,13 @@ class SimpleTradingBot:
         table.add_column("24h Volume", justify="right")
 
         for market in markets:
+            subtitle = market.get("market_subtitle") or "—"
+            subtitle_disp = subtitle[:30] + ("…" if len(subtitle) > 30 else "")
             table.add_row(
                 market["ticker"],
                 market["event_title"][:35] + ("…" if len(market["event_title"]) > 35 else ""),
                 market["market_title"][:40] + ("…" if len(market["market_title"]) > 40 else ""),
+                subtitle_disp,
                 f"{market['yes_bid']}¢",
                 f"{market['yes_ask']}¢",
                 f"{market['spread']}¢",
@@ -302,7 +314,13 @@ class SimpleTradingBot:
 
         top_n = min(len(markets), self.config.max_notifications_per_run)
         self.console.print(f"[blue]Sending {top_n} Telegram notification(s)...[/blue]")
-        for market in markets[:top_n]:
+        seen_pairs = set()
+        sent = 0
+        for market in markets:
+            key = (market.get("event_ticker"), market.get("market_subtitle") or market["ticker"])
+            if key in seen_pairs:
+                continue
+            seen_pairs.add(key)
             message = self._format_market_message(market)
             try:
                 await self.telegram_bot.send_message(
@@ -312,6 +330,9 @@ class SimpleTradingBot:
                     disable_web_page_preview=True,
                 )
                 self.console.print(f"[green]✓ Telegram alert sent for {market['ticker']}[/green]")
+                sent += 1
+                if sent >= top_n:
+                    break
             except TelegramError as exc:
                 logger.error(f"Telegram error for {market['ticker']}: {exc}")
                 self.console.print(f"[red]✗ Telegram failed for {market['ticker']}[/red]")
@@ -330,12 +351,18 @@ class SimpleTradingBot:
 
     def _format_market_message(self, market: Dict[str, Any]) -> str:
         """Build a concise Telegram message for a market."""
-        market_url = f"https://kalshi.com/market/{market['ticker']}"
-        title_link = f'<a href="{market_url}">{html.escape(market["market_title"])}</a>'
-        event_title = html.escape(market["event_title"])
+        market_url = self._build_market_url(
+            market["ticker"],
+            market.get("event_ticker"),
+            market.get("market_subtitle") or market["market_title"],
+            market.get("ticker_base"),
+        )
+        title_link = f'<a href="{market_url}">{html.escape(market["event_title"])}</a>'
+        outcome = market.get("market_subtitle") or market["market_title"]
+        outcome_line = html.escape(outcome)
         return (
             f"🎯 {title_link}\n"
-            f"{event_title}\n\n"
+            f"{outcome_line}\n\n"
             f"Ticker: <code>{market['ticker']}</code>\n"
             f"Yes bid/ask: {market['yes_bid']}¢ / {market['yes_ask']}¢ (spread {market['spread']}¢)\n"
             f"Expected return: {market['roi_cents']}¢ ({market['roi_pct']:.1f}%)\n"
@@ -371,6 +398,33 @@ class SimpleTradingBot:
             return int(dt.timestamp())
         except Exception:
             return None
+
+    @staticmethod
+    def _event_slug(event_ticker: Optional[str]) -> str:
+        if not event_ticker:
+            return "market"
+        slug = event_ticker.lower()
+        match = re.search(r"-(\d{2}[a-z]{3}\d{2})$", slug)
+        if match:
+            slug = slug[: match.start()]
+        return slug
+
+    @staticmethod
+    def _slugify(value: str) -> str:
+        slug = re.sub(r"[^a-z0-9]+", "-", value.lower()).strip("-")
+        return slug or "market"
+
+    def _build_market_url(
+        self,
+        ticker: str,
+        event_ticker: Optional[str],
+        market_subtitle: str,
+        ticker_base: Optional[str],
+    ) -> str:
+        base = (ticker_base or ticker).lower()
+        event_slug = self._event_slug(event_ticker or ticker)
+        outcome_slug = self._slugify(market_subtitle or ticker)
+        return f"https://kalshi.com/markets/{event_slug}/{outcome_slug}/{base}"
 
     async def run(self):
         """Main execution pipeline."""
