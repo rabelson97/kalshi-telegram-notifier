@@ -16,7 +16,6 @@ dependencies = [
     "loguru>=0.7.0",
     "rich>=13.0.0",
     "cryptography>=41.0.0",
-    "openai>=1.0.0",
     "python-telegram-bot>=21.0",
 ]
 

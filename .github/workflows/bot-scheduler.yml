@@ -33,16 +33,15 @@ jobs:
           KALSHI_API_KEY: ${{ secrets.KALSHI_API_KEY }}
           KALSHI_PRIVATE_KEY: ${{ secrets.KALSHI_PRIVATE_KEY }}
           KALSHI_USE_DEMO: ${{ secrets.KALSHI_USE_DEMO }}
-          OCTAGON_API_KEY: ${{ secrets.OCTAGON_API_KEY }}
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           DISABLE_TRADING: "true"
           MAX_EVENTS_TO_ANALYZE: "40"
           MAX_HOURS_TO_CLOSE: "24"
+          MIN_YES_PRICE_CENTS: "90"
           MIN_SPREAD_CENTS: "1"
-          MIN_CONFIDENCE_FOR_NOTIFICATION: "0.7"
           MAX_NOTIFICATIONS_PER_RUN: "5"
+          MIN_VOLUME_24H: "1000"
         run: |
           export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH"
           uv run trading_bot.py --max-expiration-hours 24

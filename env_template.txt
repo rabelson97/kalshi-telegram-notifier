@@ -1,112 +1,45 @@
-# Simple Kalshi Trading Bot Environment Configuration
-# Copy this file to .env and fill in your API credentials
+# Kalshi High-Probability Notifier Configuration
+# Copy to .env and fill in your credentials.
 
 # =============================================================================
 # KALSHI API CONFIGURATION
 # =============================================================================
 
-# Kalshi API credentials
+# Required Kalshi API credentials
 KALSHI_API_KEY=your_kalshi_api_key_here
 
-# Kalshi Private Key (PEM format) - IMPORTANT: Include the full PEM key with \n for line breaks
-# Format: KALSHI_PRIVATE_KEY="-----BEGIN RSA PRIVATE KEY-----\nMIIEpAIBAAKCAQEA...\n-----END RSA PRIVATE KEY-----"
-# OR use a file path: KALSHI_PRIVATE_KEY_FILE=/path/to/your/private_key.pem
+# Provide the full PEM key (include \n for line breaks) or point to a .pem file.
 KALSHI_PRIVATE_KEY="-----BEGIN RSA PRIVATE KEY-----\nyour_private_key_content_here\n-----END RSA PRIVATE KEY-----"
+# KALSHI_PRIVATE_KEY_FILE=/path/to/private_key.pem
 
-# Environment (use demo for testing)
+# Use the demo exchange by default
 KALSHI_USE_DEMO=true
 
 # =============================================================================
-# OCTAGON DEEP RESEARCH API CONFIGURATION
+# BOT FILTERS & LIMITS
 # =============================================================================
 
-# Octagon API credentials
-OCTAGON_API_KEY=your_octagon_api_key_here
-OCTAGON_BASE_URL=https://api-gateway.octagonagents.com/v1
+MAX_EVENTS_TO_ANALYZE=50        # Number of top events (by 24h volume) to scan
+MAX_MARKETS_PER_EVENT=10        # Max markets per event (selects top N by volume)
+MAX_HOURS_TO_CLOSE=24.0         # Only include markets closing within this many hours
+MIN_YES_PRICE_CENTS=90          # Minimum YES bid price (in cents) to qualify
+MIN_SPREAD_CENTS=1              # Minimum bid/ask spread (cents) to ensure liquidity
+MIN_VOLUME_24H=1000             # Minimum 24h volume (event or market) to consider
 
 # =============================================================================
-# OPENAI API CONFIGURATION
+# NOTIFICATIONS
 # =============================================================================
 
-# OpenAI API for structured betting decisions
-OPENAI_API_KEY=your_openai_api_key_here
-OPENAI_MODEL=gpt-5
+MAX_NOTIFICATIONS_PER_RUN=5     # Send at most this many markets to Telegram each run
+TELEGRAM_BOT_TOKEN=             # Bot token from @BotFather
+TELEGRAM_CHAT_ID=               # Chat/channel ID (use @userinfobot to find yours)
+
+# Keep automated trading disabled (recommended)
+DISABLE_TRADING=true
 
 # =============================================================================
-# BOT CONFIGURATION
+# SETUP NOTES
 # =============================================================================
-
-# Market processing limits
-MAX_BET_AMOUNT=25.0
-
-# Event analysis configuration
-MAX_EVENTS_TO_ANALYZE=50      # Number of top events to analyze by 24h volume
-RESEARCH_BATCH_SIZE=10        # Number of parallel deep research requests (1-20 recommended)
-SKIP_EXISTING_POSITIONS=true # Skip betting on markets where we already have positions
-MINIMUM_TIME_REMAINING_HOURS=1.0  # Minimum hours remaining before event strike to consider it tradeable (only applied to events with strike_date)
-MAX_MARKETS_PER_EVENT=10     # Maximum number of markets per event to analyze (selects top N markets by volume)
-MINIMUM_ALPHA_THRESHOLD=2.0  # Minimum alpha threshold for betting (research_price / market_price must be >= this value)
-
-# Market filtering & notifications
-MAX_HOURS_TO_CLOSE=24.0              # Only analyze markets closing within this many hours
-MIN_SPREAD_CENTS=1                   # Minimum bid/ask spread (cents) to ensure basic liquidity
-MIN_CONFIDENCE_FOR_NOTIFICATION=0.7  # Minimum AI confidence required before sending a Telegram alert
-MAX_NOTIFICATIONS_PER_RUN=5          # Send at most this many notifications per execution
-TELEGRAM_BOT_TOKEN=                  # Telegram bot token from @BotFather
-TELEGRAM_CHAT_ID=                    # Telegram chat/channel ID (use @userinfobot to find yours)
-DISABLE_TRADING=true                 # Keep automated trading disabled (notifications only)
-
-# Risk management / hedging configuration
-ENABLE_HEDGING=true           # Enable hedging to minimize risk and protect downside
-HEDGE_RATIO=0.25              # Default hedge ratio (0.25 = hedge 25% of main bet on opposite side)
-MIN_CONFIDENCE_FOR_HEDGING=0.6 # Only hedge bets with confidence below this threshold (0.6 = hedge when confidence < 60%)
-MAX_HEDGE_AMOUNT=50.0         # Maximum hedge amount per bet in dollars
-
-# =============================================================================
-# SETUP INSTRUCTIONS
-# =============================================================================
-
-# 1. Get Kalshi API credentials:
-#    - Go to https://kalshi.com/profile/api (or demo.kalshi.co for demo)
-#    - Generate API key and download private key
-#    - For demo: use demo.kalshi.co with separate demo credentials
-#    - For production: use api.kalshi.co with production credentials
-
-# 2. Format your private key properly:
-#    OPTION A: In .env file with \n (recommended for testing)
-#    KALSHI_PRIVATE_KEY="-----BEGIN RSA PRIVATE KEY-----\nMIIEpAIBAAKCAQEA...\n-----END RSA PRIVATE KEY-----"
-#    
-#    OPTION B: Use a separate file (recommended for production)
-#    KALSHI_PRIVATE_KEY_FILE=kalshi_private_key.pem
-#    
-#    OPTION C: Multi-line format in .env (may not work with all parsers)
-#    KALSHI_PRIVATE_KEY="-----BEGIN RSA PRIVATE KEY-----
-#    MIIEpAIBAAKCAQEA...
-#    -----END RSA PRIVATE KEY-----"
-
-# 3. Get Octagon API key:
-#    - Contact Octagon team for API access
-#    - Replace OCTAGON_API_KEY with your actual key
-
-# 4. Get OpenAI API key:
-#    - Go to https://platform.openai.com/api-keys
-#    - Create a new API key
-#    - Ensure you have access to GPT-4 models
-
-# 5. Test setup:
-#    - Start with DRY_RUN=true and KALSHI_USE_DEMO=true
-#    - Test with small MAX_EVENTS_TO_ANALYZE (5-10) first
-#    - Only use production after thorough testing
-
-# =============================================================================
-# RECOMMENDED TESTING FLOW
-# =============================================================================
-
-# Phase 1: Demo + Dry Run
-# KALSHI_USE_DEMO=true, DRY_RUN=true, MAX_EVENTS_TO_ANALYZE=5
-
-# Phase 2: Demo + Live Trading  
-# KALSHI_USE_DEMO=true, DRY_RUN=false, MAX_EVENTS_TO_ANALYZE=10
-
-# Phase 3: Production + Live Trading
-# KALSHI_USE_DEMO=false, DRY_RUN=false, MAX_EVENTS_TO_ANALYZE=50 
+# - Kalshi demo credentials are separate from production.
+# - Start with demo mode before pointing at real markets.
+# - The bot does not place orders; it only surfaces high-confidence opportunities.
